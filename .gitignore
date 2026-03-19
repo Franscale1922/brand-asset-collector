@@ -14,6 +14,9 @@ credentials/client_secrets.json
 credentials/token.json
 credentials/service_account.json
 
+# Configuration
+config/settings.py
+
 # Local output (large files)
 output/brands/
 
