@@ -1,0 +1,7 @@
+{
+  "1-800-Packouts": {
+    "status": "failed",
+    "failed_at": "2026-03-19T22:55:17.437800+00:00",
+    "error": "logo: not found; drive_upload: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&alt=json returned \"File not found: 1IccJPTBcJ19aVwt5H0ZIUz2qWFi0mqEP.\". Details: \"[{'message': 'File not found: 1IccJPTBcJ19aVwt5H0ZIUz2qWFi0mqEP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]\">"
+  }
+}

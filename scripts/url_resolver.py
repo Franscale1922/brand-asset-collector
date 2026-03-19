@@ -1,10 +1,11 @@
 """
 url_resolver.py – Find consumer-facing URL and franchise offering URL for a brand.
 
-Strategy:
-  1. Try DuckDuckGo Instant Answer API (no key needed) for the brand's main domain.
-  2. Scrape the brand's website for a /franchise page link.
-  3. Fallback: return None and log for manual review.
+Strategy (in priority order):
+  1. Smart domain guess from brand name/slug (fastest, most reliable)
+  2. DuckDuckGo Instant Answer API (no key required)
+  3. Google search scrape (fallback)
+  4. Fallback: return None and log for manual review.
 """
 
 import re
@@ -37,6 +38,41 @@ FRANCHISE_PATH_KEYWORDS = [
 ]
 
 
+def _slug_to_domain_candidates(brand: str, slug: str) -> list:
+    """
+    Generate likely domain candidates from brand name/slug.
+    e.g. '1-800-Packouts' → ['1800packouts.com', '1-800packouts.com', ...]
+    """
+    name = brand.lower()
+    slug_lower = slug.lower()
+
+    candidates = []
+
+    # Strip common words and punctuation variants
+    cleaned = re.sub(r"[^a-z0-9]", "", name)           # 1800packouts
+    hyphen_clean = re.sub(r"[^a-z0-9-]", "", slug_lower)  # 1-800-packouts
+
+    tlds = [".com", ".net", ".co"]
+    for base in [cleaned, hyphen_clean, name.replace(" ", ""), name.replace(" ", "-")]:
+        for tld in tlds:
+            candidates.append(f"https://www.{base}{tld}")
+            candidates.append(f"https://{base}{tld}")
+
+    return list(dict.fromkeys(candidates))  # dedupe preserving order
+
+
+def _verify_url(url: str, timeout: int = 8) -> Optional[str]:
+    """Return the final URL if it resolves successfully, else None."""
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
+        if resp.status_code < 400:
+            parsed = urlparse(resp.url)
+            return f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        pass
+    return None
+
+
 def _ddg_search(query: str, timeout: int = 10) -> Optional[str]:
     """Use DuckDuckGo Instant Answer API to get top result URL."""
     try:
@@ -48,7 +84,6 @@ def _ddg_search(query: str, timeout: int = 10) -> Optional[str]:
         )
         resp.raise_for_status()
         data = resp.json()
-        # Prefer AbstractURL → RelatedTopics first result
         if data.get("AbstractURL"):
             return data["AbstractURL"]
         topics = data.get("RelatedTopics", [])
@@ -60,7 +95,7 @@ def _ddg_search(query: str, timeout: int = 10) -> Optional[str]:
 
 
 def _google_search_url(query: str, timeout: int = 10) -> Optional[str]:
-    """Fallback: scrape Google search results (fragile, rate-limited)."""
+    """Fallback: scrape Google search results."""
     try:
         resp = requests.get(
             "https://www.google.com/search",
@@ -73,29 +108,41 @@ def _google_search_url(query: str, timeout: int = 10) -> Optional[str]:
             href = a["href"]
             if href.startswith("/url?q="):
                 url = href.split("/url?q=")[1].split("&")[0]
-                # Skip Google's own domains
-                if "google.com" not in url:
+                if "google.com" not in url and url.startswith("http"):
                     return url
     except Exception as e:
         logger.debug("Google search failed for '%s': %s", query, e)
     return None
 
 
-def find_consumer_url(brand: str, timeout: int = 10) -> Optional[str]:
+def find_consumer_url(brand: str, slug: str = "", timeout: int = 8) -> Optional[str]:
     """Find the consumer-facing website for a brand."""
-    query = f"{brand} official website"
-    url = _ddg_search(query, timeout)
-    if not url:
-        url = _google_search_url(brand, timeout)
+
+    # Strategy 1: Try domain guessing from slug/name (fastest + most reliable)
+    for candidate in _slug_to_domain_candidates(brand, slug or brand):
+        result = _verify_url(candidate, timeout)
+        if result:
+            logger.debug("  Domain guess hit: %s → %s", candidate, result)
+            return result
+
+    # Strategy 2: DuckDuckGo
+    url = _ddg_search(f"{brand} official website", timeout)
     if url:
-        # Normalize to root domain
         parsed = urlparse(url)
         return f"{parsed.scheme}://{parsed.netloc}"
+
+    # Strategy 3: Google scrape
+    url = _google_search_url(brand, timeout)
+    if url:
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
     return None
 
 
-def find_franchise_url(brand: str, consumer_url: Optional[str], timeout: int = 10) -> Optional[str]:
+def find_franchise_url(brand: str, consumer_url: Optional[str], timeout: int = 8) -> Optional[str]:
     """Find the franchise offering URL for a brand."""
+
     # Strategy 1: check known franchise path keywords on the consumer site
     if consumer_url:
         for path in FRANCHISE_PATH_KEYWORDS:
@@ -104,7 +151,7 @@ def find_franchise_url(brand: str, consumer_url: Optional[str], timeout: int = 1
                 resp = requests.head(candidate, headers=HEADERS, timeout=timeout, allow_redirects=True)
                 if resp.status_code < 400:
                     return candidate
-                time.sleep(0.3)
+                time.sleep(0.2)
             except Exception:
                 continue
 
@@ -124,21 +171,21 @@ def find_franchise_url(brand: str, consumer_url: Optional[str], timeout: int = 1
             logger.debug("Scraping franchise link failed for %s: %s", brand, e)
 
     # Strategy 3: search directly
-    query = f"{brand} franchise opportunity official site"
-    url = _ddg_search(query, timeout)
+    url = _ddg_search(f"{brand} franchise opportunity official site", timeout)
     if not url:
-        url = _google_search_url(query, timeout)
+        url = _google_search_url(f"{brand} franchise opportunity", timeout)
     return url
 
 
-def resolve_urls(brand: str) -> Tuple[Optional[str], Optional[str]]:
+def resolve_urls(brand: str, slug: str = "") -> Tuple[Optional[str], Optional[str]]:
     """
     Resolve both consumer URL and franchise offering URL for a brand.
     Returns (consumer_url, franchise_url).
     """
     logger.info("Resolving URLs for: %s", brand)
-    consumer_url = find_consumer_url(brand)
+    consumer_url = find_consumer_url(brand, slug)
     franchise_url = find_franchise_url(brand, consumer_url)
     logger.info("  consumer_url = %s", consumer_url)
     logger.info("  franchise_url = %s", franchise_url)
     return consumer_url, franchise_url
+

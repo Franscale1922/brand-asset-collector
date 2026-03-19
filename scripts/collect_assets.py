@@ -173,7 +173,7 @@ def process_brand(brand_data: dict, args: argparse.Namespace, drive_service=None
 
     # ── 1. Resolve URLs ───────────────────────────────────────────────────────
     try:
-        consumer_url, franchise_url = resolve_urls(brand)
+        consumer_url, franchise_url = resolve_urls(brand, slug)
         collected_assets["consumer_url"] = consumer_url
         collected_assets["franchise_url"] = franchise_url
         urls_file = write_urls_file(slug, consumer_url, franchise_url, output_dir)

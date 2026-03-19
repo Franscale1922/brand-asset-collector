@@ -62,6 +62,7 @@ def get_or_create_folder(service, parent_id: str, folder_name: str) -> str:
     """
     Get the Drive folder ID for `folder_name` inside `parent_id`.
     Creates the folder if it doesn't exist.
+    Works with both My Drive and Shared Drives.
     Returns folder ID.
     """
     query = (
@@ -70,7 +71,12 @@ def get_or_create_folder(service, parent_id: str, folder_name: str) -> str:
         f"and '{parent_id}' in parents "
         f"and trashed=false"
     )
-    results = service.files().list(q=query, fields="files(id, name)").execute()
+    results = service.files().list(
+        q=query,
+        fields="files(id, name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
     files = results.get("files", [])
 
     if files:
@@ -84,7 +90,11 @@ def get_or_create_folder(service, parent_id: str, folder_name: str) -> str:
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id],
     }
-    folder = service.files().create(body=metadata, fields="id").execute()
+    folder = service.files().create(
+        body=metadata,
+        fields="id",
+        supportsAllDrives=True,
+    ).execute()
     folder_id = folder["id"]
     logger.info("  Created Drive folder '%s' (id=%s)", folder_name, folder_id)
     return folder_id
@@ -99,6 +109,7 @@ def upload_file(
     """
     Upload a local file to a Drive folder.
     If `overwrite=True`, deletes any existing file with the same name first.
+    Works with both My Drive and Shared Drives.
     Returns the Drive file ID.
     """
     filename = os.path.basename(local_path)
@@ -108,15 +119,26 @@ def upload_file(
     if overwrite:
         # Find and delete existing file with same name
         query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
-        results = service.files().list(q=query, fields="files(id)").execute()
+        results = service.files().list(
+            q=query,
+            fields="files(id)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute()
         for f in results.get("files", []):
-            service.files().delete(fileId=f["id"]).execute()
+            service.files().delete(
+                fileId=f["id"],
+                supportsAllDrives=True,
+            ).execute()
             logger.debug("  Deleted existing Drive file: %s", filename)
 
     media = MediaFileUpload(local_path, mimetype=mime_type, resumable=True)
     metadata = {"name": filename, "parents": [folder_id]}
     uploaded = service.files().create(
-        body=metadata, media_body=media, fields="id"
+        body=metadata,
+        media_body=media,
+        fields="id",
+        supportsAllDrives=True,
     ).execute()
     file_id = uploaded.get("id")
     logger.info("  Uploaded '%s' → Drive (id=%s)", filename, file_id)
