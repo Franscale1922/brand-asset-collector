@@ -1,7 +1,7 @@
 {
   "1-800-Packouts": {
     "status": "failed",
-    "failed_at": "2026-03-19T23:22:25.861495+00:00",
-    "error": "style_guide: generation skipped (check OPENAI_API_KEY); drive_upload: name 'upload_file' is not defined"
+    "failed_at": "2026-03-19T23:30:08.531118+00:00",
+    "error": "style_guide: generation skipped (check OPENAI_API_KEY); drive_upload: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files/18RyUUpaJ52fckhJ_3n-UtkCqKDZoe4IP?supportsAllDrives=true returned \"File not found: 18RyUUpaJ52fckhJ_3n-UtkCqKDZoe4IP.\". Details: \"[{'message': 'File not found: 18RyUUpaJ52fckhJ_3n-UtkCqKDZoe4IP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]\">"
   }
 }

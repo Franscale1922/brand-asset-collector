@@ -108,7 +108,7 @@ def upload_file(
 ) -> Optional[str]:
     """
     Upload a local file to a Drive folder.
-    If `overwrite=True`, deletes any existing file with the same name first.
+    If `overwrite=True` and a file with the same name exists, updates it in-place.
     Works with both My Drive and Shared Drives.
     Returns the Drive file ID.
     """
@@ -116,8 +116,9 @@ def upload_file(
     mime_type, _ = mimetypes.guess_type(local_path)
     mime_type = mime_type or "application/octet-stream"
 
+    # Check for an existing file with the same name
+    existing_id = None
     if overwrite:
-        # Find and delete existing file with same name
         query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
         results = service.files().list(
             q=query,
@@ -125,24 +126,36 @@ def upload_file(
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
         ).execute()
-        for f in results.get("files", []):
-            service.files().delete(
-                fileId=f["id"],
-                supportsAllDrives=True,
-            ).execute()
-            logger.debug("  Deleted existing Drive file: %s", filename)
+        files = results.get("files", [])
+        if files:
+            existing_id = files[0]["id"]
 
     media = MediaFileUpload(local_path, mimetype=mime_type, resumable=True)
-    metadata = {"name": filename, "parents": [folder_id]}
-    uploaded = service.files().create(
-        body=metadata,
-        media_body=media,
-        fields="id",
-        supportsAllDrives=True,
-    ).execute()
-    file_id = uploaded.get("id")
-    logger.info("  Uploaded '%s' → Drive (id=%s)", filename, file_id)
+
+    if existing_id:
+        # Update the existing file in-place (avoids delete, works on Shared Drives)
+        updated = service.files().update(
+            fileId=existing_id,
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+        file_id = updated.get("id")
+        logger.info("  Updated '%s' → Drive (id=%s)", filename, file_id)
+    else:
+        # Create new file
+        metadata = {"name": filename, "parents": [folder_id]}
+        uploaded = service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+        file_id = uploaded.get("id")
+        logger.info("  Uploaded '%s' → Drive (id=%s)", filename, file_id)
+
     return file_id
+
 
 
 def upload_folder_contents(service, folder_id: str, local_dir: str) -> dict:
