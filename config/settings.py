@@ -9,21 +9,23 @@ import os
 # Root Drive folder where brand subfolders will be created
 DRIVE_ROOT_FOLDER_ID = "1IccJPTBcJ19aVwt5H0ZIUz2qWFi0mqEP"
 
-# Path to OAuth 2.0 client secrets JSON (downloaded from GCP Console)
-OAUTH_CLIENT_SECRETS = os.path.join(
-    os.path.dirname(__file__), "..", "credentials", "client_secrets.json"
+# Service account key file (see credentials/.gitignore)
+SERVICE_ACCOUNT_FILE = os.path.join(
+    os.path.dirname(__file__), "..", "credentials", "service-account.json"
 )
 
-# Path where the OAuth token will be stored after first login
-OAUTH_TOKEN_FILE = os.path.join(
-    os.path.dirname(__file__), "..", "credentials", "token.json"
-)
+# ─── OpenAI ───────────────────────────────────────────────────────────────────
+# GPT-4o Vision is used to generate the Brand Visual Synthesis Guide.
+# Set here OR export OPENAI_API_KEY in your shell.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")  # leave blank to use env var
 
-# Drive API scopes
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+# ─── Franchise Library PDFs ───────────────────────────────────────────────────
+# Path to the local franchise-library repo (for OneSheet/PresentationPoints PDFs)
+# Update this if your franchise-library is in a different location.
+FRANCHISE_LIBRARY_PATH = os.path.expanduser("~/Projects/franchise-library")
 
-# ─── Franchise Library ────────────────────────────────────────────────────────
-# Path to the franchise_index.json from the franchise-library repo
+# ─── Franchise Library Index ──────────────────────────────────────────────────
+# Path to the franchise_index.json (copied/symlinked from franchise-library repo)
 FRANCHISE_INDEX_PATH = os.path.join(
     os.path.dirname(__file__), "..", "franchise_index.json"
 )

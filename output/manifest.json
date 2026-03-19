@@ -1,7 +1,19 @@
 {
   "1-800-Packouts": {
-    "status": "failed",
-    "failed_at": "2026-03-19T22:55:17.437800+00:00",
-    "error": "logo: not found; drive_upload: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&alt=json returned \"File not found: 1IccJPTBcJ19aVwt5H0ZIUz2qWFi0mqEP.\". Details: \"[{'message': 'File not found: 1IccJPTBcJ19aVwt5H0ZIUz2qWFi0mqEP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]\">"
+    "status": "complete",
+    "completed_at": "2026-03-19T23:08:27.725193+00:00",
+    "assets": {
+      "consumer_url": "https://www.1800packouts.com",
+      "franchise_url": null,
+      "urls_file": "urls.md",
+      "logo": "1-800-Packouts_logo.png",
+      "images_franchise": "images_franchise.png",
+      "images_marketing": "images_marketing.png",
+      "images_interior": "images_interior.png",
+      "design_style_guide": "design_style_guide.md",
+      "notebooklm_generic": "notebooklm_generic.md",
+      "notebooklm_personalized": "notebooklm_personalized.md"
+    },
+    "drive_folder_id": "1c1gravDj3HrsQtZ3yZYOBpWwk0DOIENf"
   }
 }
