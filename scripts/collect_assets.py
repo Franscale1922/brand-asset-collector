@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""
+collect_assets.py – Main orchestration script for franchise brand asset collection.
+
+Usage examples:
+  python collect_assets.py --all
+  python collect_assets.py --brand 1-800-Packouts
+  python collect_assets.py --brands 1-800-Packouts 360-Painting Bath-Tune-Up
+  python collect_assets.py --all --resume
+  python collect_assets.py --brand 1-800-Packouts --dry-run
+  python collect_assets.py --all --refresh-prompts
+  python collect_assets.py --all --concurrency 5
+"""
+
+import argparse
+import json
+import logging
+import os
+import shutil
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from typing import List, Optional
+
+# ── Path setup ────────────────────────────────────────────────────────────────
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.join(_HERE, "..")
+sys.path.insert(0, _ROOT)
+
+from config import settings
+from scripts.manifest import is_complete, mark_complete, mark_failed, summary
+from scripts.url_resolver import resolve_urls
+from scripts.logo_fetcher import fetch_logo
+from scripts.screenshot_taker import capture_image_searches
+from scripts.drive_uploader import get_drive_service, get_or_create_folder, upload_folder_contents
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def load_franchise_index() -> List[dict]:
+    """Load brands from franchise_index.json."""
+    path = settings.FRANCHISE_INDEX_PATH
+    if not os.path.exists(path):
+        # Try sibling copy
+        alt = os.path.join(_ROOT, "franchise_index.json")
+        if os.path.exists(alt):
+            path = alt
+        else:
+            raise FileNotFoundError(
+                f"franchise_index.json not found at {path}\n"
+                "Copy or symlink it from the franchise-library repo:\n"
+                "  cp ~/Projects/franchise-library/_metadata/franchise_index.json "
+                "brand-asset-collector/franchise_index.json"
+            )
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("franchisors", [])
+
+
+def filter_brands(all_brands: List[dict], args: argparse.Namespace) -> List[dict]:
+    """Apply run-mode filters to brand list."""
+    if args.brand:
+        filtered = [b for b in all_brands if b["slug"] == args.brand]
+        if not filtered:
+            logger.error("Brand slug '%s' not found in index.", args.brand)
+            sys.exit(1)
+        return filtered
+    if args.brands:
+        slugs = set(args.brands)
+        filtered = [b for b in all_brands if b["slug"] in slugs]
+        missing = slugs - {b["slug"] for b in filtered}
+        if missing:
+            logger.warning("Brands not found in index: %s", ", ".join(sorted(missing)))
+        return filtered
+    # --all
+    return all_brands
+
+
+def render_template(tmpl_path: str, brand: str) -> str:
+    """Render a .md.tmpl file substituting {brand} and {generated_date}."""
+    with open(tmpl_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return content.replace("{brand}", brand).replace(
+        "{generated_date}", datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    )
+
+
+def write_prompts(brand: str, slug: str, output_dir: str, refresh: bool = False) -> List[str]:
+    """Write prompt placeholder .md files into the brand output directory."""
+    tmpl_dir = os.path.join(_ROOT, "prompts")
+    templates = {
+        "design_style_guide.md.tmpl": "design_style_guide.md",
+        "notebooklm_generic.md.tmpl": "notebooklm_generic.md",
+        "notebooklm_personalized.md.tmpl": "notebooklm_personalized.md",
+    }
+    written = []
+    for tmpl_name, out_name in templates.items():
+        dest = os.path.join(output_dir, out_name)
+        if os.path.exists(dest) and not refresh:
+            written.append(dest)
+            continue
+        tmpl_path = os.path.join(tmpl_dir, tmpl_name)
+        if not os.path.exists(tmpl_path):
+            logger.warning("Template not found: %s", tmpl_path)
+            continue
+        content = render_template(tmpl_path, brand)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(content)
+        written.append(dest)
+    return written
+
+
+def write_urls_file(
+    slug: str,
+    consumer_url: Optional[str],
+    franchise_url: Optional[str],
+    output_dir: str,
+) -> str:
+    """Write a simple markdown file with the brand's URLs."""
+    dest = os.path.join(output_dir, "urls.md")
+    content = f"""# URLs – {slug}
+
+| Type | URL |
+|------|-----|
+| Consumer-facing | {consumer_url or "⚠️ Not found – manual review needed"} |
+| Franchise offering | {franchise_url or "⚠️ Not found – manual review needed"} |
+
+_Generated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}_
+"""
+    with open(dest, "w", encoding="utf-8") as f:
+        f.write(content)
+    return dest
+
+
+# ── Core: process one brand ───────────────────────────────────────────────────
+
+def process_brand(brand_data: dict, args: argparse.Namespace, drive_service=None) -> bool:
+    """
+    Collect all assets for a single brand.
+    Returns True on success, False on failure.
+    """
+    slug = brand_data["slug"]
+    brand = brand_data["brand"]
+
+    logger.info("━" * 60)
+    logger.info("Processing: %s  (slug: %s)", brand, slug)
+
+    # Skip if already complete and --resume flag set
+    if args.resume and is_complete(slug):
+        logger.info("  ↳ Skipping (already complete).")
+        return True
+
+    # Local output directory for this brand
+    output_dir = os.path.join(settings.BRAND_OUTPUT_DIR, slug)
+    os.makedirs(output_dir, exist_ok=True)
+
+    if args.dry_run:
+        logger.info("  [DRY RUN] Would collect assets for: %s", brand)
+        logger.info("  [DRY RUN] Output dir: %s", output_dir)
+        logger.info("  [DRY RUN] Drive folder: %s/%s", settings.DRIVE_ROOT_FOLDER_ID, slug)
+        return True
+
+    collected_assets = {}
+    errors = []
+
+    # ── 1. Resolve URLs ───────────────────────────────────────────────────────
+    try:
+        consumer_url, franchise_url = resolve_urls(brand)
+        collected_assets["consumer_url"] = consumer_url
+        collected_assets["franchise_url"] = franchise_url
+        urls_file = write_urls_file(slug, consumer_url, franchise_url, output_dir)
+        collected_assets["urls_file"] = os.path.basename(urls_file)
+    except Exception as e:
+        logger.error("URL resolution failed for %s: %s", brand, e)
+        errors.append(f"url_resolution: {e}")
+        consumer_url, franchise_url = None, None
+
+    # ── 2. Fetch Logo ─────────────────────────────────────────────────────────
+    try:
+        logo_path = fetch_logo(brand, consumer_url, output_dir, slug)
+        collected_assets["logo"] = os.path.basename(logo_path) if logo_path else None
+        if not logo_path:
+            errors.append("logo: not found")
+    except Exception as e:
+        logger.error("Logo fetch failed for %s: %s", brand, e)
+        errors.append(f"logo: {e}")
+
+    # ── 3. Google Images Screenshots ─────────────────────────────────────────
+    try:
+        screenshot_paths = capture_image_searches(
+            brand=brand,
+            output_dir=output_dir,
+            queries=settings.IMAGE_SEARCH_QUERIES,
+            filenames=settings.IMAGE_SEARCH_FILENAMES,
+            width=settings.SCREENSHOT_WIDTH,
+            height=settings.SCREENSHOT_HEIGHT,
+            wait_ms=settings.SCREENSHOT_WAIT_MS,
+        )
+        for fname, path in zip(settings.IMAGE_SEARCH_FILENAMES, screenshot_paths):
+            key = fname.replace(".png", "")
+            collected_assets[key] = os.path.basename(path) if path else None
+            if not path:
+                errors.append(f"screenshot/{fname}: failed")
+    except Exception as e:
+        logger.error("Screenshots failed for %s: %s", brand, e)
+        errors.append(f"screenshots: {e}")
+
+    # ── 4. Prompt Placeholders ────────────────────────────────────────────────
+    try:
+        prompt_files = write_prompts(brand, slug, output_dir, refresh=args.refresh_prompts)
+        for p in prompt_files:
+            key = os.path.splitext(os.path.basename(p))[0]
+            collected_assets[key] = os.path.basename(p)
+    except Exception as e:
+        logger.error("Prompt writing failed for %s: %s", brand, e)
+        errors.append(f"prompts: {e}")
+
+    # ── 5. Upload to Google Drive ─────────────────────────────────────────────
+    drive_folder_id = None
+    if drive_service and not args.no_upload:
+        try:
+            drive_folder_id = get_or_create_folder(
+                drive_service, settings.DRIVE_ROOT_FOLDER_ID, slug
+            )
+            upload_folder_contents(drive_service, drive_folder_id, output_dir)
+        except Exception as e:
+            logger.error("Drive upload failed for %s: %s", brand, e)
+            errors.append(f"drive_upload: {e}")
+
+    # ── 6. Update manifest ────────────────────────────────────────────────────
+    if errors:
+        mark_failed(slug, "; ".join(errors))
+        logger.warning("  ✗ Completed with errors: %s", "; ".join(errors))
+        return False
+    else:
+        mark_complete(slug, collected_assets, drive_folder_id or "")
+        logger.info("  ✓ Complete: %s", slug)
+        return True
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Collect brand assets for franchise library brands.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+
+    # Run mode (mutually exclusive)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--all", action="store_true", help="Run all brands")
+    mode.add_argument("--brand", metavar="SLUG", help="Run a single brand by slug")
+    mode.add_argument("--brands", nargs="+", metavar="SLUG", help="Run specific brands by slug")
+
+    # Options
+    parser.add_argument("--resume", action="store_true",
+                        help="Skip brands already marked complete in manifest")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print what would be done without writing files or uploading")
+    parser.add_argument("--refresh-prompts", action="store_true",
+                        help="Overwrite existing prompt placeholder files")
+    parser.add_argument("--no-upload", action="store_true",
+                        help="Collect assets locally but skip Drive upload")
+    parser.add_argument("--concurrency", type=int, default=settings.DEFAULT_CONCURRENCY,
+                        metavar="N", help=f"Parallel workers (default: {settings.DEFAULT_CONCURRENCY})")
+
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    # Load brand list
+    all_brands = load_franchise_index()
+    brands_to_process = filter_brands(all_brands, args)
+
+    logger.info("Brand asset collector starting.")
+    logger.info("  Brands to process: %d", len(brands_to_process))
+    logger.info("  Dry run: %s", args.dry_run)
+    logger.info("  Resume: %s", args.resume)
+    logger.info("  Concurrency: %d", args.concurrency)
+    logger.info("  No upload: %s", args.no_upload)
+
+    # Initialize Drive service (skip in dry-run or no-upload mode)
+    drive_service = None
+    if not args.dry_run and not args.no_upload:
+        try:
+            drive_service = get_drive_service()
+            logger.info("  Google Drive: authenticated ✓")
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Drive authentication failed: %s", e)
+            sys.exit(1)
+
+    # Ensure output dirs exist
+    os.makedirs(settings.BRAND_OUTPUT_DIR, exist_ok=True)
+    os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
+
+    # Process brands
+    results = {"success": 0, "failed": 0, "skipped": 0}
+
+    if args.concurrency > 1 and len(brands_to_process) > 1:
+        # Parallel execution
+        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
+            futures = {
+                executor.submit(process_brand, b, args, drive_service): b["slug"]
+                for b in brands_to_process
+            }
+            for future in as_completed(futures):
+                slug = futures[future]
+                try:
+                    ok = future.result()
+                    if ok:
+                        results["success"] += 1
+                    else:
+                        results["failed"] += 1
+                except Exception as e:
+                    logger.error("Unhandled error for %s: %s", slug, e)
+                    results["failed"] += 1
+    else:
+        # Sequential
+        for brand_data in brands_to_process:
+            if args.resume and is_complete(brand_data["slug"]):
+                results["skipped"] += 1
+                continue
+            ok = process_brand(brand_data, args, drive_service)
+            results["success" if ok else "failed"] += 1
+
+    # Final summary
+    logger.info("=" * 60)
+    logger.info("DONE.")
+    logger.info("  ✓ Success : %d", results["success"])
+    logger.info("  ✗ Failed  : %d", results["failed"])
+    logger.info("  ↷ Skipped : %d", results["skipped"])
+
+    manifest_stats = summary()
+    logger.info("  Manifest total complete: %d", manifest_stats.get("complete", 0))
+
+    if results["failed"] > 0:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

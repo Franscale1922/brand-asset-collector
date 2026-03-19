@@ -1,0 +1,31 @@
+# Brand Asset Collector
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Credentials (never commit)
+credentials/client_secrets.json
+credentials/token.json
+credentials/service_account.json
+
+# Local output (large files)
+output/brands/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
