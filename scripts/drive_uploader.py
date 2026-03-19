@@ -1,8 +1,11 @@
 """
 drive_uploader.py – Google Drive API helpers.
 
-Handles OAuth 2.0 authentication, idempotent folder creation,
-and file upload with overwrite-by-name logic.
+Uses service account authentication (no browser pop-up required).
+Set SERVICE_ACCOUNT_FILE in config/settings.py or via environment variable
+GOOGLE_SERVICE_ACCOUNT_JSON.
+
+Handles idempotent folder creation and file upload with overwrite-by-name logic.
 """
 
 import logging
@@ -10,9 +13,7 @@ import mimetypes
 import os
 from typing import Optional
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -20,38 +21,40 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-# Resolved at runtime from config
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_CONFIG_DIR = os.path.join(_HERE, "..", "config")
 _CREDS_DIR = os.path.join(_HERE, "..", "credentials")
 
-CLIENT_SECRETS = os.path.join(_CREDS_DIR, "client_secrets.json")
-TOKEN_FILE = os.path.join(_CREDS_DIR, "token.json")
+# Default service account key location – override via env var
+_DEFAULT_SA_KEY = os.path.join(_CREDS_DIR, "service-account.json")
 
 
-def get_drive_service():
-    """Authenticate and return a Google Drive API service instance."""
-    creds = None
+def get_drive_service(service_account_file: Optional[str] = None):
+    """
+    Authenticate using a service account and return a Google Drive API service.
 
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    Priority for key file:
+      1. `service_account_file` argument
+      2. GOOGLE_SERVICE_ACCOUNT_JSON environment variable
+      3. credentials/service-account.json (default)
+    """
+    key_path = (
+        service_account_file
+        or os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        or _DEFAULT_SA_KEY
+    )
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(CLIENT_SECRETS):
-                raise FileNotFoundError(
-                    f"Missing OAuth client secrets at: {CLIENT_SECRETS}\n"
-                    "Download from GCP Console → APIs & Services → Credentials → "
-                    "OAuth 2.0 Client IDs → Download JSON → save as credentials/client_secrets.json"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS, SCOPES)
-            creds = flow.run_local_server(port=0)
+    if not os.path.exists(key_path):
+        raise FileNotFoundError(
+            f"Service account key not found at: {key_path}\n"
+            "Copy your service account JSON to credentials/service-account.json\n"
+            "or set the GOOGLE_SERVICE_ACCOUNT_JSON environment variable.\n"
+            f"Service account email: local-websites-sheets@local-websites-490618.iam.gserviceaccount.com"
+        )
 
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
-
+    creds = service_account.Credentials.from_service_account_file(
+        key_path, scopes=SCOPES
+    )
+    logger.debug("Authenticated via service account: %s", creds.service_account_email)
     return build("drive", "v3", credentials=creds)
 
 
