@@ -32,7 +32,7 @@ from scripts.manifest import is_complete, mark_complete, mark_failed, summary
 from scripts.url_resolver import resolve_urls
 from scripts.logo_fetcher import fetch_logo
 from scripts.screenshot_taker import capture_image_searches
-from scripts.drive_uploader import get_drive_service, get_or_create_folder, upload_folder_contents
+from scripts.drive_uploader import get_drive_service, get_or_create_folder, upload_folder_contents, upload_file
 from scripts.style_guide_generator import generate_style_guide
 
 # ── Logging ───────────────────────────────────────────────────────────────────

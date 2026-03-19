@@ -1,19 +1,7 @@
 {
   "1-800-Packouts": {
-    "status": "complete",
-    "completed_at": "2026-03-19T23:08:27.725193+00:00",
-    "assets": {
-      "consumer_url": "https://www.1800packouts.com",
-      "franchise_url": null,
-      "urls_file": "urls.md",
-      "logo": "1-800-Packouts_logo.png",
-      "images_franchise": "images_franchise.png",
-      "images_marketing": "images_marketing.png",
-      "images_interior": "images_interior.png",
-      "design_style_guide": "design_style_guide.md",
-      "notebooklm_generic": "notebooklm_generic.md",
-      "notebooklm_personalized": "notebooklm_personalized.md"
-    },
-    "drive_folder_id": "1c1gravDj3HrsQtZ3yZYOBpWwk0DOIENf"
+    "status": "failed",
+    "failed_at": "2026-03-19T23:22:25.861495+00:00",
+    "error": "style_guide: generation skipped (check OPENAI_API_KEY); drive_upload: name 'upload_file' is not defined"
   }
 }
