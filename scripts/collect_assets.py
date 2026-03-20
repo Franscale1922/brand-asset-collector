@@ -69,9 +69,9 @@ def load_franchise_index() -> List[dict]:
 def filter_brands(all_brands: List[dict], args: argparse.Namespace) -> List[dict]:
     """Apply run-mode filters to brand list."""
     if args.brand:
-        filtered = [b for b in all_brands if b["slug"] == args.brand]
+        filtered = [b for b in all_brands if b["slug"] == args.brand or b["brand"] == args.brand]
         if not filtered:
-            logger.error("Brand slug '%s' not found in index.", args.brand)
+            logger.error("Brand '%s' not found in index (try slug or exact brand name).", args.brand)
             sys.exit(1)
         return filtered
     if args.brands:

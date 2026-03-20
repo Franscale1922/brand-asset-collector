@@ -16,11 +16,6 @@
     },
     "drive_folder_id": "1c1gravDj3HrsQtZ3yZYOBpWwk0DOIENf"
   },
-  "2nd-Family": {
-    "status": "failed",
-    "failed_at": "2026-03-20T00:04:02.819469+00:00",
-    "error": "drive_upload: [SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:2580)"
-  },
   "1-800-STRIPER": {
     "status": "complete",
     "completed_at": "2026-03-20T00:04:23.542032+00:00",
