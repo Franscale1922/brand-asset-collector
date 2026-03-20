@@ -1,16 +1,21 @@
 """
-logo_fetcher.py – Download the highest-quality logo for a brand.
+logo_fetcher.py – Download the brand logo.
 
-Strategy:
-  1. Clearbit Logo API (free, high quality, no key needed).
-  2. Scrape brand's website for Open Graph image or apple-touch-icon.
-  3. Fallback: None (logged for manual handling).
+Strategy (in order):
+  1. Clearbit Logo API (free, no key needed) — cleanest logos.
+  2. Scrape homepage for logo-specific images:
+       a. <img> tags with "logo" in src or alt
+       b. <link> tags with "logo" in href
+       c. apple-touch-icon (higher res than favicon, often brand icon)
+       d. og:image (last resort — often a lifestyle/hero photo, not a logo)
+  3. Try Clearbit with a guessed domain.
+  4. Fallback: None — logged for manual review.
 """
 
 import logging
 import os
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,7 +38,6 @@ def _domain_from_url(url: Optional[str]) -> Optional[str]:
         return None
     parsed = urlparse(url)
     netloc = parsed.netloc or url
-    # Strip www.
     return netloc.replace("www.", "").split(":")[0]
 
 
@@ -52,47 +56,78 @@ def _try_clearbit(domain: str, dest_path: str, timeout: int = 10) -> bool:
     return False
 
 
-def _try_og_image(consumer_url: str, dest_path: str, timeout: int = 10) -> bool:
-    """Try scraping OG image / apple-touch-icon from homepage."""
+def _download_image(url: str, dest_path: str, timeout: int = 10) -> bool:
+    """Download an image URL to dest_path. Returns True on success."""
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=timeout)
+        ct = resp.headers.get("Content-Type", "")
+        if resp.status_code == 200 and ct.startswith("image"):
+            with open(dest_path, "wb") as f:
+                f.write(resp.content)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _try_site_logo(consumer_url: str, dest_path: str, timeout: int = 10) -> bool:
+    """
+    Scrape the homepage for the best logo image.
+
+    Priority order (lower = better):
+      1. <img> with "logo" in src or alt
+      2. <link> with "logo" in href
+      3. apple-touch-icon (high-res brand icon)
+      4. og:image (last resort — often a hero/lifestyle photo)
+    """
     try:
         resp = requests.get(consumer_url, headers=HEADERS, timeout=timeout)
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        candidates = []
+        candidates = []  # (priority, url)
 
-        # OG image
-        og = soup.find("meta", property="og:image")
-        if og and og.get("content"):
-            candidates.append(og["content"])
+        # Priority 1: <img src="...logo..."> or alt="...logo..."
+        for img in soup.find_all("img", src=True):
+            src = img.get("src", "")
+            alt = img.get("alt", "").lower()
+            if "logo" in src.lower() or "logo" in alt:
+                full = urljoin(consumer_url, src)
+                candidates.append((1, full))
 
-        # Apple touch icon (usually high res)
+        # Priority 2: <link href="...logo...">
+        for link in soup.find_all("link", href=True):
+            href = link.get("href", "")
+            if "logo" in href.lower():
+                full = urljoin(consumer_url, href)
+                candidates.append((2, full))
+
+        # Priority 3: apple-touch-icon
         for rel in ["apple-touch-icon", "apple-touch-icon-precomposed"]:
             icon = soup.find("link", rel=lambda r: r and rel in r)
             if icon and icon.get("href"):
-                href = icon["href"]
-                if not href.startswith("http"):
-                    href = consumer_url.rstrip("/") + "/" + href.lstrip("/")
-                candidates.append(href)
+                full = urljoin(consumer_url, icon["href"])
+                candidates.append((3, full))
 
-        for img_url in candidates:
-            try:
-                img_resp = requests.get(img_url, headers=HEADERS, timeout=timeout)
-                if img_resp.status_code == 200 and img_resp.headers.get("Content-Type", "").startswith("image"):
-                    with open(dest_path, "wb") as f:
-                        f.write(img_resp.content)
-                    logger.info("  Logo via OG/icon scrape: %s", img_url)
-                    return True
-            except Exception:
-                continue
+        # Priority 4: og:image (last resort)
+        og = soup.find("meta", property="og:image")
+        if og and og.get("content"):
+            candidates.append((4, og["content"]))
+
+        # Try in priority order (stable sort by priority)
+        candidates.sort(key=lambda x: x[0])
+        for priority, img_url in candidates:
+            if _download_image(img_url, dest_path, timeout):
+                logger.info("  Logo via site scrape (priority=%d): %s", priority, img_url)
+                return True
+
     except Exception as e:
-        logger.debug("OG image scrape failed for %s: %s", consumer_url, e)
+        logger.debug("Site logo scrape failed for %s: %s", consumer_url, e)
     return False
 
 
 def fetch_logo(brand: str, consumer_url: Optional[str], output_dir: str, slug: str) -> Optional[str]:
     """
     Download logo for a brand.
-
     Returns the local file path on success, None on failure.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -100,17 +135,17 @@ def fetch_logo(brand: str, consumer_url: Optional[str], output_dir: str, slug: s
 
     domain = _domain_from_url(consumer_url)
 
-    # Strategy 1: Clearbit
+    # Strategy 1: Clearbit (cleanest result)
     if domain and _try_clearbit(domain, dest_path):
         return dest_path
 
-    # Strategy 2: Scrape OG image
-    if consumer_url and _try_og_image(consumer_url, dest_path):
+    # Strategy 2: Scrape site, logo-first priority
+    if consumer_url and _try_site_logo(consumer_url, dest_path):
         return dest_path
 
-    # Strategy 3: Try brand name as domain guess
-    guessed_domain = brand.lower().replace(" ", "") + ".com"
-    if guessed_domain != domain and _try_clearbit(guessed_domain, dest_path):
+    # Strategy 3: Clearbit with guessed domain
+    guessed = brand.lower().replace(" ", "").replace("-", "") + ".com"
+    if guessed != domain and _try_clearbit(guessed, dest_path):
         return dest_path
 
     logger.warning("  Could not fetch logo for %s — manual review needed.", brand)

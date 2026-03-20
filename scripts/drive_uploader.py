@@ -105,13 +105,33 @@ def upload_file(
     folder_id: str,
     local_path: str,
     overwrite: bool = True,
+    retries: int = 3,
 ) -> Optional[str]:
     """
-    Upload a local file to a Drive folder.
+    Upload a local file to a Drive folder with retry on transient errors.
     If `overwrite=True` and a file with the same name exists, updates it in-place.
     Works with both My Drive and Shared Drives.
     Returns the Drive file ID.
     """
+    import time
+
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            return _upload_once(service, folder_id, local_path, overwrite)
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                logger.warning(
+                    "  Upload attempt %d/%d failed for %s: %s — retrying in 2s...",
+                    attempt, retries, os.path.basename(local_path), e,
+                )
+                time.sleep(2)
+    raise last_err
+
+
+def _upload_once(service, folder_id: str, local_path: str, overwrite: bool) -> Optional[str]:
+    """Single upload attempt (called by upload_file retry wrapper)."""
     filename = os.path.basename(local_path)
     mime_type, _ = mimetypes.guess_type(local_path)
     mime_type = mime_type or "application/octet-stream"

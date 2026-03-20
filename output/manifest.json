@@ -1,7 +1,26 @@
 {
   "1-800-Packouts": {
+    "status": "complete",
+    "completed_at": "2026-03-19T23:48:46.030033+00:00",
+    "assets": {
+      "consumer_url": "https://www.1800packouts.com",
+      "franchise_url": null,
+      "urls_file": "urls.md",
+      "logo": "1-800-Packouts_logo.png",
+      "images_franchise": "images_franchise.png",
+      "images_marketing": "images_marketing.png",
+      "images_interior": "images_interior.png",
+      "brand_visual_synthesis_guide": "brand_visual_synthesis_guide.md",
+      "notebooklm_generic": "notebooklm_generic.md",
+      "notebooklm_personalized": "notebooklm_personalized.md"
+    },
+    "drive_folder_id": "1c1gravDj3HrsQtZ3yZYOBpWwk0DOIENf"
+  },
+  "1-800-STRIPER": {
     "status": "failed",
-    "failed_at": "2026-03-19T23:30:08.531118+00:00",
-    "error": "style_guide: generation skipped (check OPENAI_API_KEY); drive_upload: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files/18RyUUpaJ52fckhJ_3n-UtkCqKDZoe4IP?supportsAllDrives=true returned \"File not found: 18RyUUpaJ52fckhJ_3n-UtkCqKDZoe4IP.\". Details: \"[{'message': 'File not found: 18RyUUpaJ52fckhJ_3n-UtkCqKDZoe4IP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]\">"
+    "failed_at": "2026-03-19T23:55:09.023848+00:00",
+    "error": "drive_upload: [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2580)"
+  }
+}BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2580)"
   }
 }
