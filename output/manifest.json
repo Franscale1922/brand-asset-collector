@@ -16,11 +16,31 @@
     },
     "drive_folder_id": "1c1gravDj3HrsQtZ3yZYOBpWwk0DOIENf"
   },
-  "1-800-STRIPER": {
+  "2nd-Family": {
     "status": "failed",
-    "failed_at": "2026-03-19T23:55:09.023848+00:00",
-    "error": "drive_upload: [SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2580)"
-  }
-}BAD_RECORD_MAC] decryption failed or bad record mac (_ssl.c:2580)"
+    "failed_at": "2026-03-20T00:04:02.819469+00:00",
+    "error": "drive_upload: [SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:2580)"
+  },
+  "1-800-STRIPER": {
+    "status": "complete",
+    "completed_at": "2026-03-20T00:04:23.542032+00:00",
+    "assets": {
+      "consumer_url": "https://1800striper.com",
+      "franchise_url": "https://1800striper.com/franchise",
+      "urls_file": "urls.md",
+      "logo": "1-800-STRIPER_logo.png",
+      "images_franchise": "images_franchise.png",
+      "images_marketing": "images_marketing.png",
+      "images_interior": "images_interior.png",
+      "brand_visual_synthesis_guide": "brand_visual_synthesis_guide.md",
+      "notebooklm_generic": "notebooklm_generic.md",
+      "notebooklm_personalized": "notebooklm_personalized.md"
+    },
+    "drive_folder_id": "1WZ_rbxLPQzqGoteoFh3yelrMucyqxkuG"
+  },
+  "360-Painting": {
+    "status": "failed",
+    "failed_at": "2026-03-20T00:04:48.794308+00:00",
+    "error": "style_guide: generation skipped (check OPENAI_API_KEY)"
   }
 }

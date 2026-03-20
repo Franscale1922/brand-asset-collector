@@ -31,7 +31,7 @@ from config import settings
 from scripts.manifest import is_complete, mark_complete, mark_failed, summary
 from scripts.url_resolver import resolve_urls
 from scripts.logo_fetcher import fetch_logo
-from scripts.screenshot_taker import capture_image_searches
+from scripts.screenshot_taker import capture_image_searches, capture_website
 from scripts.drive_uploader import get_drive_service, get_or_create_folder, upload_folder_contents, upload_file
 from scripts.style_guide_generator import generate_style_guide
 
@@ -190,6 +190,15 @@ def process_brand(brand_data: dict, args: argparse.Namespace, drive_service=None
         errors.append(f"url_resolution: {e}")
         consumer_url, franchise_url = None, None
 
+    # ── 1b. Website screenshot (for style guide — brand-controlled, won't trigger content filters)
+    website_screenshot = None
+    if consumer_url:
+        website_screenshot = capture_website(
+            url=consumer_url,
+            output_dir=output_dir,
+            filename="website_screenshot.png",
+        )
+
     # ── 2. Fetch Logo ─────────────────────────────────────────────────────────
     try:
         logo_path = fetch_logo(brand, consumer_url, output_dir, slug)
@@ -243,7 +252,7 @@ def process_brand(brand_data: dict, args: argparse.Namespace, drive_service=None
             slug=slug,
             output_dir=output_dir,
             logo_path=logo_path,
-            screenshot_paths=screen_paths,
+            website_screenshot=website_screenshot,
             onesheet_pdf=onesheet_pdf,
             presentation_pdf=pres_pdf,
             consumer_url=collected_assets.get("consumer_url"),

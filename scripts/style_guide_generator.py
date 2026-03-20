@@ -192,7 +192,7 @@ def generate_style_guide(
     slug: str,
     output_dir: str,
     logo_path: Optional[str],
-    screenshot_paths: list,
+    website_screenshot: Optional[str],   # brand homepage screenshot (safe, brand-controlled)
     onesheet_pdf: Optional[str],
     presentation_pdf: Optional[str],
     consumer_url: Optional[str],
@@ -200,6 +200,17 @@ def generate_style_guide(
 ) -> Optional[str]:
     """
     Generate brand_visual_synthesis_guide.md using GPT-4o Vision.
+
+    Visual inputs (brand-controlled, won't trigger content filters):
+      - website_screenshot: brand homepage at detail="high" (colors, layout, fonts)
+      - logo_path: brand logo at detail="low"
+
+    Fallback chain:
+      1. Website screenshot (high) + logo (low)
+      2. Website screenshot only
+      3. Logo only
+      4. Text only (PDFs + URL)
+
     Returns the path to the saved file, or None on failure.
     """
     key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -219,7 +230,7 @@ def generate_style_guide(
 
     client = OpenAI(api_key=key)
 
-    # Build prompt with text context
+    # Build text prompt with context
     prompt = STYLE_GUIDE_PROMPT.replace("{brand}", brand)
     extras = []
     if consumer_url:
@@ -233,35 +244,53 @@ def generate_style_guide(
     if extras:
         prompt += "\n\nBrand context:\n" + "\n\n".join(extras)
 
-    # Gather image lists
+    # Image tuples: (path, label, detail)
+    site_imgs = []
+    if website_screenshot and os.path.exists(website_screenshot):
+        site_imgs.append((website_screenshot, "Brand website homepage", "high"))
+
     logo_imgs = []
     if logo_path and os.path.exists(logo_path):
-        logo_imgs.append((logo_path, "Brand logo"))
-
-    screen_imgs = []
-    labels = ["Google Images: franchise", "Google Images: marketing", "Google Images: interior"]
-    for i, path in enumerate(screenshot_paths or []):
-        if path and os.path.exists(path):
-            screen_imgs.append((path, labels[i] if i < len(labels) else f"Screenshot {i+1}"))
+        logo_imgs.append((logo_path, "Brand logo", "low"))
 
     logger.info("  Generating Brand Visual Synthesis Guide via GPT-4o for %s...", brand)
 
-    # Attempt 1: logo + screenshots (detail=low – avoids filter on mixed content)
+    def build_messages(img_list):
+        content = [{"type": "text", "text": prompt}]
+        for img_path, label, detail in img_list:
+            b64 = _image_to_base64(img_path)
+            if b64:
+                content.append({"type": "text", "text": f"[{label}]"})
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{_mime_for_image(img_path)};base64,{b64}",
+                        "detail": detail,
+                    }
+                })
+        return [{"role": "user", "content": content}]
+
+    # Attempt 1: website (high) + logo (low)
     guide = None
-    all_imgs = logo_imgs + screen_imgs
+    all_imgs = site_imgs + logo_imgs
     if all_imgs:
-        guide = _call_gpt(client, _build_messages(prompt, all_imgs, "low"), brand)
+        guide = _call_gpt(client, build_messages(all_imgs), brand)
 
-    # Attempt 2: logo only
-    if guide is None and logo_imgs and screen_imgs:
+    # Attempt 2: website only
+    if guide is None and site_imgs and logo_imgs:
+        logger.info("  Retry: website screenshot only for %s...", brand)
+        guide = _call_gpt(client, build_messages(site_imgs), brand)
+
+    # Attempt 3: logo only
+    if guide is None and logo_imgs:
         logger.info("  Retry: logo only for %s...", brand)
-        guide = _call_gpt(client, _build_messages(prompt, logo_imgs, "low"), brand)
+        guide = _call_gpt(client, build_messages(logo_imgs), brand)
 
-    # Attempt 3: text only
+    # Attempt 4: text only
     if guide is None:
         logger.info("  Retry: text-only for %s...", brand)
-        text_only_prompt = prompt + "\n\n(Visual assets unavailable — base analysis on text context only.)"
-        guide = _call_gpt(client, [{"role": "user", "content": text_only_prompt}], brand)
+        text_msg = [{"role": "user", "content": prompt + "\n\n(Visual assets unavailable — base analysis on text context only.)"}]
+        guide = _call_gpt(client, text_msg, brand)
 
     if not guide:
         logger.error("  All GPT-4o attempts failed for %s", brand)
@@ -272,3 +301,4 @@ def generate_style_guide(
         f.write(guide)
     logger.info("  Brand Visual Synthesis Guide saved: %s", dest)
     return dest
+
